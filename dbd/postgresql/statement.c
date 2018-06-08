@@ -6,6 +6,7 @@
 #define INT8OID                 20
 #define FLOAT4OID		700
 #define FLOAT8OID		701
+#define DECIMALOID		1700
 
 static lua_push_type_t postgresql_to_lua_push(unsigned int postgresql_type) {
     lua_push_type_t lua_type;
@@ -19,6 +20,7 @@ static lua_push_type_t postgresql_to_lua_push(unsigned int postgresql_type) {
 
     case FLOAT4OID:
     case FLOAT8OID:
+    case DECIMALOID:
         lua_type = LUA_PUSH_NUMBER;
         break;
 
@@ -38,17 +40,24 @@ static int deallocate(statement_t *statement) {
 	PGresult *result;
 	ExecStatusType status;
 
-	snprintf(command, IDLEN+13, "DEALLOCATE \"%s\"", statement->name);    
-    result = PQexec(statement->postgresql, command);
+	/*
+	 * It's possible to get here with a closed database handle
+	 * - either by a mistake by the calling Lua program, or by
+	 * garbage collection. Don't die in that case.
+	 */
+	if (!statement->conn->postgresql) {
+		snprintf(command, IDLEN+13, "DEALLOCATE \"%s\"", statement->name);    
+    	result = PQexec(statement->conn->postgresql, command);
 
-    if (!result)
-        return 1;
+    	if (!result)
+	        return 1;
 
-    status = PQresultStatus(result);
-    PQclear(result);
+	    status = PQresultStatus(result);
+	    PQclear(result);
 
-    if (status != PGRES_COMMAND_OK && status != PGRES_TUPLES_OK)
-        return 1;
+    	if (status != PGRES_COMMAND_OK && status != PGRES_TUPLES_OK)
+        	return 1;
+    }
 
     return 0;
 }
@@ -82,8 +91,8 @@ static int statement_close(lua_State *L) {
          */ 
         deallocate(statement); 
 
-	PQclear(statement->result);
-	statement->result = NULL;
+		PQclear(statement->result);
+		statement->result = NULL;
     }
 
     return 0;    
@@ -129,6 +138,17 @@ static int statement_execute(lua_State *L) {
     const char **params;
     PGresult *result = NULL;
 
+
+	/*
+	 * Sanity check - is database still connected?
+	 */
+	if (PQstatus(statement->conn->postgresql) != CONNECTION_OK)
+		{
+		lua_pushstring(L, DBI_ERR_STATEMENT_BROKEN);
+		lua_error(L);	
+		}
+
+
     statement->tuple = 0;
 
     params = malloc(num_bind_params * sizeof(params));
@@ -168,7 +188,7 @@ static int statement_execute(lua_State *L) {
     }
 
     result = PQexecPrepared(
-        statement->postgresql,
+        statement->conn->postgresql,
         statement->name,
         num_bind_params,
         (const char **)params,
@@ -188,7 +208,7 @@ cleanup:
 
     if (!result) {
         lua_pushboolean(L, 0);
-        lua_pushfstring(L, DBI_ERR_ALLOC_RESULT,  PQerrorMessage(statement->postgresql));
+        lua_pushfstring(L, DBI_ERR_ALLOC_RESULT,  PQerrorMessage(statement->conn->postgresql));
         return 2;
     }
     
@@ -378,7 +398,7 @@ int dbd_postgresql_statement_create(lua_State *L, connection_t *conn, const char
     /*
      * convert SQL string into a PSQL API compatible SQL statement
      */ 
-    new_sql = replace_placeholders(L, '$', sql_query);
+    new_sql = dbd_replace_placeholders(L, '$', sql_query);
 
     snprintf(name, IDLEN, "dbd-postgresql-%017u", ++conn->statement_id);
 
@@ -391,24 +411,24 @@ int dbd_postgresql_statement_create(lua_State *L, connection_t *conn, const char
 
     if (!result) {
         lua_pushnil(L);
-        lua_pushfstring(L, DBI_ERR_ALLOC_STATEMENT, PQerrorMessage(statement->postgresql));
+        lua_pushfstring(L, DBI_ERR_ALLOC_STATEMENT, PQerrorMessage(statement->conn->postgresql));
         return 2;
     }
     
     status = PQresultStatus(result);
     if (status != PGRES_COMMAND_OK && status != PGRES_TUPLES_OK) {
         const char *err_string = PQresultErrorMessage(result);
-        PQclear(result);
 
         lua_pushnil(L);
         lua_pushfstring(L, DBI_ERR_PREP_STATEMENT, err_string);
+        PQclear(result);
         return 2;
     }
 
     PQclear(result);
 
     statement = (statement_t *)lua_newuserdata(L, sizeof(statement_t));
-    statement->postgresql = conn->postgresql;
+    statement->conn = conn;
     statement->result = NULL;
     statement->tuple = 0;
     strncpy(statement->name, name, IDLEN-1);
@@ -436,18 +456,9 @@ int dbd_postgresql_statement(lua_State *L) {
         {NULL, NULL}
     };
 
-    luaL_newmetatable(L, DBD_POSTGRESQL_STATEMENT);
-    luaL_register(L, 0, statement_methods);
-    lua_pushvalue(L,-1);
-    lua_setfield(L, -2, "__index");
-
-    lua_pushcfunction(L, statement_gc);
-    lua_setfield(L, -2, "__gc");
-
-    lua_pushcfunction(L, statement_tostring);
-    lua_setfield(L, -2, "__tostring");
-
-    luaL_register(L, DBD_POSTGRESQL_STATEMENT, statement_class_methods);
+    dbd_register(L, DBD_POSTGRESQL_STATEMENT,
+		 statement_methods, statement_class_methods,
+		 statement_gc, statement_tostring);
 
     return 1;    
 }

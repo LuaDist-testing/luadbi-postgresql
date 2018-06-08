@@ -1,7 +1,7 @@
 -- This file was automatically generated for the LuaDist project.
 
 package = "luadbi-postgresql"
-version = "0.5-2"
+version = "0.6-2"
 
 description = {
 	summary = "Database abstraction layer",
@@ -22,18 +22,18 @@ description = {
 
 -- LuaDist source
 source = {
-  tag = "0.5-2",
+  tag = "0.6-2",
   url = "git://github.com/LuaDist-testing/luadbi-postgresql.git"
 }
 -- Original source
 -- source = {
--- 	url = "https://zadzmo.org/code/luadbi/downloads/luadbi-postgresql-0.5-1.tar.gz",
--- 	dir = "luadbi-postgresql-0.5-1"
+-- 	url = "git://github.com/mwild1/luadbi",
+-- 	tag = "v0.6"
 -- }
 
 dependencies = {
-	"lua >= 5.1, < 5.2",
-	"luadbi = 0.5"
+	"lua >= 5.1, < 5.4",
+	"luadbi = 0.6"
 }
 
 external_dependencies = {

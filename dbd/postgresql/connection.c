@@ -56,7 +56,7 @@ static int connection_new(lua_State *L) {
     case 5:
 	if (lua_isnil(L, 5) == 0) 
 	{
-	    int pport = luaL_checkint(L, 5);
+	    int pport = luaL_checkinteger(L, 5);
 
 	    if (pport >= 1 && pport <= 65535) {
 		snprintf(portbuf, sizeof(portbuf), "%d", pport);
@@ -250,6 +250,14 @@ static int connection_rollback(lua_State *L) {
 }
 
 /*
+ * last_id = connection:last_id()
+ */
+static int connection_lastid(lua_State *L) {
+    luaL_error(L, DBI_ERR_NOT_IMPLEMENTED, DBD_POSTGRESQL_CONNECTION, "last_id");
+    return 0;
+}
+
+/*
  * __gc
  */
 static int connection_gc(lua_State *L) {
@@ -279,6 +287,7 @@ int dbd_postgresql_connection(lua_State *L) {
 	{"prepare", connection_prepare},
 	{"quote", connection_quote},
 	{"rollback", connection_rollback},
+	{"last_id", connection_lastid},
 	{NULL, NULL}
     };
 
@@ -287,18 +296,9 @@ int dbd_postgresql_connection(lua_State *L) {
 	{NULL, NULL}
     };
 
-    luaL_newmetatable(L, DBD_POSTGRESQL_CONNECTION);
-    luaL_register(L, 0, connection_methods);
-    lua_pushvalue(L,-1);
-    lua_setfield(L, -2, "__index");
-
-    lua_pushcfunction(L, connection_gc);
-    lua_setfield(L, -2, "__gc");
-
-    lua_pushcfunction(L, connection_tostring);
-    lua_setfield(L, -2, "__tostring");
-
-    luaL_register(L, DBD_POSTGRESQL_CONNECTION, connection_class_methods);
+    dbd_register(L, DBD_POSTGRESQL_CONNECTION,
+		 connection_methods, connection_class_methods,
+		 connection_gc, connection_tostring);
 
     return 1;    
 }
